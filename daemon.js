@@ -333,7 +333,7 @@ export async function main(ns) {
             log(ns, '--looping-mode - scheduled remote tasks will loop themselves');
             // cycleTimingDelay = 0;
             // queueDelay = 0;
-            if (recoveryThreadPadding == 1) recoveryThreadPadding = 10; // Default if not specified (TODO: Improve timings so we don't need so much padding)
+            if (recoveryThreadPadding == 1) recoveryThreadPadding = 2; // Reduced from 10 to 2 - still provides safety margin but wastes far less RAM
             if (stockMode) stockFocus = true; // Need to actively kill scripts that go against stock because they will live forever
         }
         if (xpOnly && !options['no-share']) {
@@ -857,9 +857,8 @@ export async function main(ns) {
                         const diff = a.requiredHackLevel - b.requiredHackLevel;
                         return diff != 0.0 ? diff : b.getMoneyPerRamSecond() - a.getMoneyPerRamSecond(); // Break ties by sorting by max-money
                     });
-                    // Try to prep them all unless one of our capping rules are hit
-                    // TODO: Something was not working right here (might be working now that prep code is fixed) so we can probably start prepping more than 1 server again.
-                    for (let j = 0; j < 1 /*cantHack.length*/; j++) {
+                    // Try to prep up to 3 servers at a time unless one of our capping rules are hit
+                    for (let j = 0; j < Math.min(3, cantHack.length); j++) {
                         const server = cantHack[j];
                         if (isWorkCapped()) break;
                         if (cantHackButPrepped.includes(server) || cantHackButPrepping.includes(server))
@@ -1293,7 +1292,8 @@ export async function main(ns) {
         while (canScheduleAnother && maxScheduled++ <= maxBatches) {
             for (const job of jobs) {
                 // Find a free slot for this job, starting with largest servers as the scheduler tends to do
-                const freeSlot = simulatedRemainingRam/*.sort((a, b) => b - a)*/.findIndex(ram => ram >= job);
+                // Re-sort after each placement for more accurate fragmentation modeling
+                const freeSlot = simulatedRemainingRam.sort((a, b) => b - a).findIndex(ram => ram >= job);
                 if (freeSlot === -1)
                     canScheduleAnother = false;
                 else
@@ -2219,7 +2219,10 @@ export async function main(ns) {
                 if (lowestSec != 0) return lowestSec;
             }
             // For ready-to-hack servers, the sort order is based on money, RAM cost, and cycle time
-            let bestGains = b.getMoneyPerRamSecond() - a.getMoneyPerRamSecond(); // Groups of prepped and un-prepped servers are sorted by most money/ram.second
+            // Penalize servers with very long weaken times since they lock up RAM for longer and fit fewer cycles
+            let aScore = a.getMoneyPerRamSecond() * Math.min(1, 300000 / Math.max(1, a.timeToWeaken()));
+            let bScore = b.getMoneyPerRamSecond() * Math.min(1, 300000 / Math.max(1, b.timeToWeaken()));
+            let bestGains = bScore - aScore; // Servers with faster cycle times get a bonus
             if (bestGains != 0) return bestGains;
             // In the unlikely event that two servers have the same gains, sort them alphabetically to ensure a stable sort
             return a.name.localeCompare(b.name)
@@ -2290,11 +2293,10 @@ export async function main(ns) {
                 // Note: To be conservative, we allow double imprecision to cause this floor() to return one less than should be possible,
                 //       because the game likely doesn't account for this imprecision (e.g. let 1.9999999999999998 return 1 rather than 2)
                 let serverRamAvailable = server.ramAvailable(this.ignoreReservedRam);
-                // HACK: Temp script firing before the script gets scheduled can cause further available home ram reduction, don't promise as much from home
-                // TODO: Revise this hack, it is technically messing further with the "servers by free ram" sort order. Perhaps an alternative to this approach
-                //       is that the scheduler should not be so strict about home reserved ram enforcement if we use thread spreading and save scheduling on home for last?
+                // Apply a smaller safety margin for home to account for temp script RAM usage,
+                // but avoid the old approach that effectively doubled the home reserved RAM penalty
                 if (server.name == "home" && !this.ignoreReservedRam)
-                    serverRamAvailable -= homeReservedRam; // Note: Effectively doubles home reserved RAM in cases where we plan to consume all available RAM            
+                    serverRamAvailable -= Math.min(homeReservedRam * 0.25, serverRamAvailable * 0.1); // Small buffer instead of full double-reservation
                 const threadsHere = Math.max(0, Math.floor(serverRamAvailable / this.cost));
                 //log(server.ns, `INFO: Can fit ${threadsHere} threads of ${this.shortName} on ${server.name} (ignoreReserve: ${this.ignoreReservedRam})`)
                 if (!allowSplitting)
