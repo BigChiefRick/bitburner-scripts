@@ -224,9 +224,10 @@ async function pickSleeveTask(ns, playerInfo, playerWorkInfo, i, sleeve, canTrai
     // Opt to do shock recovery if above the --min-shock-recovery threshold
     if (sleeve.shock > options['min-shock-recovery'])
         return shockRecoveryTask(sleeve, i, `shock is above ${options['min-shock-recovery'].toFixed(0)}% (--min-shock-recovery)`);
-    // To time-balance between being useful and recovering from shock more quickly - sleeves have a random chance to be put
-    // on shock recovery. To avoid frequently interrupting tasks that take a while to complete, only re-roll every so often.
+    // Deterministic shock recovery: high shock = always recover, mid shock = use configured probability, low shock = skip
     if (sleeve.shock > 0 && options['shock-recovery'] > 0) {
+        if (sleeve.shock > 50) // High shock: always recover first to make sleeves useful faster
+            return shockRecoveryTask(sleeve, i, `shock is high (${sleeve.shock.toFixed(0)}%), prioritizing recovery until below 50%`);
         if (Date.now() - (lastRerollTime[i] || 0) < rerollTime) {
             shockChance[i] = Math.random();
             lastRerollTime[i] = Date.now();

@@ -11,7 +11,7 @@ const argsSchema = [ // The set of all command line arguments
     ['install-at-aug-plus-nf-count', 12], // or... automatically install when we can afford this many augmentations including additional levels of Neuroflux.  Note: This number will automatically be increased by 1 for every level of SF11 you have (up to 3)
     ['install-for-augs', ["The Red Pill"]], // or... automatically install as soon as we can afford one of these augmentations
     ['install-countdown', 5 * 60 * 1000], // If we're ready to install, wait this long first to see if more augs come online (we might just be gaining momentum)
-    ['time-before-boosting-best-hack-server', 15 * 60 * 1000], // Wait this long before picking our best hack-income server and spending hashes on boosting it
+    ['time-before-boosting-best-hack-server', 5 * 60 * 1000], // Wait this long before picking our best hack-income server and spending hashes on boosting it
     ['reduced-aug-requirement-per-hour', 0.5], // For every hour since the last reset, require this many fewer augs to install.
     ['interval', 2000], // Wake up this often (milliseconds) to check on things
     ['interval-check-scripts', 10000], // Get a listing of all running processes on home this frequently
@@ -25,7 +25,7 @@ const argsSchema = [ // The set of all command line arguments
     ['spend-hashes-on-server-hacking-threshold', 0.1], // Threshold for how good hacking multipliers must be to merit spending hashes for boosting hack income. Set to a large number to disable this entirely.
     ['on-completion-script', null], // Spawn this script when we defeat the bitnode
     ['on-completion-script-args', []], // Optional args to pass to the script when we defeat the bitnode
-    ['xp-mode-interval-minutes', 55], // Every time this many minutes has elapsed, toggle daemon.js to runing in --xp-only mode, which prioritizes earning hack-exp rather than money
+    ['xp-mode-interval-minutes', 0], // Disabled by default - the constant daemon restarts waste income. Enable near milestones via --xp-mode-interval-minutes 55
     ['xp-mode-duration-minutes', 5], // The number of minutes to keep daemon.js in --xp-only mode before switching back to normal money-earning mode.
     ['no-tail-windows', false], // Set to true to prevent the default behaviour of opening a tail window for certain launched scripts. (Doesn't affect scripts that open their own tail windows)
 ];
@@ -706,7 +706,7 @@ export async function main(ns) {
 
         // Launch work-for-factions if it isn't already running (rules for maybe killing unproductive instances are above)
         // Note: We delay launching our own 'work-for-factions.js' until daemon has warmed up, so we don't steal it's "kickstartHackXp" study focus
-        if ((4 in unlockedSFs) && !findScript('work-for-factions.js') && Date.now() - daemonStartTime > 30000) {
+        if ((4 in unlockedSFs) && !findScript('work-for-factions.js') && Date.now() - daemonStartTime > 5000) {
             // If we're trying to rush gangs, run in such a way that we will spend most of our time doing crime, reducing Karma (also okay early income)
             // NOTE: Default work-for-factions behaviour is to spend hashes on coding contracts, which suits us fine
             launchScriptHelper(ns, 'work-for-factions.js', rushGang ? rushGangsArgs : workForFactionsArgs);
@@ -923,15 +923,18 @@ export async function main(ns) {
                 // First, check if we're ready to install TRP - if so, don't delay the install for any additional augmentations.
                 if (!augsToInstall.includes(augTRP)) {
                     // Otherwise, each time we can afford more augs, reset the install delay timer to take advantage of "momentum"
-                    // and potentially purchase many more augmentations in this reset. To avoid delaying an install indefinitely,
-                    // we reduce the additional time we're willing to wait a little bit each time this happens.
+                    // and potentially purchase many more augmentations in this reset. Cap resets to avoid indefinite delays.
                     installCountdownResets++;
-                    const newCountDown = Date.now() + Math.max(10 * 1000, // At a bare minimum, wait 10 more seconds
-                        // Heuristic: Linearly reduce the cooldown until we have doubled the aug count needed.
-                        options['install-countdown'] * (1 - (installCountdownResets / augsNeededInclNf)));
-                    if (newCountDown > installCountdown) { // If the existing countdown remaining was longer than this, leave it be
-                        installCountdown = newCountDown;
-                        purchaseChangeLog = purchaseChangeLog + ' Resetting the timer before we install augmentations.'
+                    if (installCountdownResets <= 5) { // Cap at 5 resets to prevent indefinite install delays
+                        const newCountDown = Date.now() + Math.max(10 * 1000, // At a bare minimum, wait 10 more seconds
+                            // Heuristic: Linearly reduce the cooldown until we have doubled the aug count needed.
+                            options['install-countdown'] * (1 - (installCountdownResets / augsNeededInclNf)));
+                        if (newCountDown > installCountdown) { // If the existing countdown remaining was longer than this, leave it be
+                            installCountdown = newCountDown;
+                            purchaseChangeLog = purchaseChangeLog + ' Resetting the timer before we install augmentations.'
+                        }
+                    } else {
+                        purchaseChangeLog = purchaseChangeLog + ' Max countdown resets (5) reached, proceeding with install.'
                     }
                 }
                 log(ns, purchaseChangeLog, true);

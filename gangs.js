@@ -320,7 +320,8 @@ async function optimizeGangCrime(ns, myGangInfo) {
     let bestTaskAssignments = null, bestWanted = 0;
     let bestTotalGain = myGangInfo.wantedLevelGainRate > wantedGainTolerance ? 0 : // Forget our past achievements, we're gaining wanted levels too fast right now
         optStat == "respect" ? myGangInfo.respectGainRate : myGangInfo.moneyGainRate; // Must do better than the current gain rate if it's within our wanted threshold
-    for (let shuffle = 0; shuffle < 100; shuffle++) { // We can discover more optimal results by greedy-optimizing gang members in a different order. Try a few.
+    const shuffleCount = Math.min(100, Math.max(20, myGangMembers.length * 5)); // Scale shuffles with member count: fewer early, more late
+    for (let shuffle = 0; shuffle < shuffleCount; shuffle++) { // We can discover more optimal results by greedy-optimizing gang members in a different order. Try a few.
         let proposedTasks = {}, totalWanted = 0, totalGain = 0;
         shuffleArray(myGangMembers.slice()).forEach((member, index) => {
             const taskRates = memberTaskRates[member];
